@@ -4,7 +4,89 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+#include <limits.h>
+#include "_constants.h"
 const int NUM_BASES = 4;
+
+int min(int n, int k){
+  if (n > k)
+    return k;
+  else
+    return n;
+}
+
+unsigned long long bin(unsigned long long n, unsigned long long k){
+
+  unsigned long long c = 1;
+  for (unsigned long long i = 1; i <= k; i++, n--) {
+
+    if (c/i > ULONG_MAX/n) // return 0 on potential overflow
+      return 0;
+
+    c = c / i * n + c % i * n / i; // split c * n / i into (c / i * i + c % i) * n / i
+  }
+
+  return c; 
+}
+
+float norm_cdf(float x, float mu, float sigma){
+  float z = (x - mu) / fabs(sigma);
+  return (1 + erff(z / sqrtf(2.0))) / 2.00;
+}
+
+float norm_pf(float x, float mu, float sigma){
+  if (sigma != 0)
+    return norm_cdf(x + 0.5, mu, sigma) - norm_cdf(x - 0.5, mu, sigma);
+  if (x == mu)
+    return 1.00;
+  return 0.00;
+}
+
+float get_numerator(int dna_length, int distance, float mu, float sigma){
+  float numerator = norm_pf(distance, mu, sigma);
+  if (sigma == 0.00)
+    return numerator;
+
+  float auc = norm_cdf(dna_length - 1, mu, sigma) - norm_cdf(0, mu, sigma);
+  if (auc < 0.000001)
+    auc = 0.000001;
+
+  if (numerator < 0.00001)
+    numerator = 0.00001;
+
+  return numerator /= auc;
+
+}
+
+float get_denominator(int d, int N, int L){
+  if (1 <= d && d <= L - N + 1)
+    return (float) bin(L - d, N - 1) / (float) bin(L, N);
+  return 0.0001;
+}
+
+float get_score(float *arr, int dna_length, int effective_length, int num_rec, 
+                int gap_size, int max_length, int curr_conn, bool is_precomputed){
+  if (is_precomputed == false){
+    return log2f(get_numerator(dna_length, gap_size, arr[curr_conn * 2], arr[curr_conn * 2 + 1]) / 
+                 get_denominator(gap_size + 1, num_rec, effective_length));
+  }
+  
+  return log2(arr[curr_conn * max_length + gap_size]) - 
+          (
+            (
+              NUMERATORS[(effective_length - (gap_size + 1)) - 1] - 
+              NUMERATORS[(num_rec - 1) - 1] - 
+              NUMERATORS[effective_length - (gap_size + 1) - (num_rec - 1) - 1]
+            ) -
+
+            (
+              NUMERATORS[effective_length - 1] - 
+              NUMERATORS[num_rec - 1] - 
+              NUMERATORS[effective_length - num_rec - 1]
+            )
+          );
+}
 
 int get_forward_offset(int index, int cols[], int num_rec) {
   // finds the first possible possition for a pssm
@@ -41,10 +123,9 @@ int max_index(float *arr, int size) {
   return max_index;
 }
 
-
 void traceback(int num_rec, int len_seq, float* con_matrices, float* rec_score_matrix, 
                int num_alignments, float* rec_alignments, int* con_alignments,
-               float* rec_scores, float* con_scores, int* con_lengths){
+               float* rec_scores, float* con_scores, int* con_lengths, int max_seq_len, int effective_len, bool is_precomputed){
   // finding gap lengths to ref orma alignments
   // starting from the index of the greatest score in alignments
   // trace back of gap alignments is conducted by subtracting the value
@@ -68,7 +149,8 @@ void traceback(int num_rec, int len_seq, float* con_matrices, float* rec_score_m
 
   int gapOffset = 0;
   for (int i = 0; i < num_rec - 1; i++) {
-    con_scores[i] = con_matrices[i * len_seq + con_lengths[i + 1]];
+    //con_scores[i] = get_score(con_matrices[i * max_seq_len + con_lengths[i + 1]], effective_len, num_rec, con_lengths[i + 1]);
+    con_scores[i] = get_score(con_matrices, len_seq, effective_len, num_rec, con_lengths[i + 1], max_seq_len, i, is_precomputed);
   }
 
   // scores for each PSSM are filled by iterating over the score matrix
@@ -81,19 +163,25 @@ void traceback(int num_rec, int len_seq, float* con_matrices, float* rec_score_m
 }
 
 void fill_traceback_matrix(float *score_matrix, int num_alignments, float *gapMatrix,
-               int *cols, int num_rec, int len_seq, float *con_scores,
-               float *rec_scores, int *con_lengths) {
+                           int *cols, int num_rec, int len_seq, float *con_scores, float *rec_scores, 
+                           int *con_lengths, int max_length, bool is_precomputed) {
   int gap_length = 0;
+  int effective_length = len_seq;
+  int sum_of_lengths = 0;
 
-  // printf("last in traceback\n");
+  for (int i = 0; i < num_rec; i++){
+    sum_of_lengths += cols[i];
+  }
+
+  effective_length -= sum_of_lengths;
   //  number of total alignments by number of pssms
   //  first index in each column holds current max score for that index
   //  all other indices hold gap lengths that got that alignment
   float *alignments = PyMem_Calloc(num_alignments, sizeof(*score_matrix));
-  int *gap_alignments =
-      PyMem_Calloc(num_alignments * (num_rec - 1), sizeof(*con_lengths));
+  int *gap_alignments = PyMem_Calloc(num_alignments * (num_rec - 1), sizeof(*con_lengths));
   float *temp_max_scores = PyMem_Calloc(num_alignments, sizeof(*score_matrix));
   int *temp_gap_lengths = PyMem_Calloc(num_alignments, sizeof(*con_lengths));
+  float temp_gap_score = 0.0;
 
   // start with first row as our current max
   for (int i = 0; i < num_alignments; i++) {
@@ -120,19 +208,18 @@ void fill_traceback_matrix(float *score_matrix, int num_alignments, float *gapMa
         // gap_length = difference between column normalized j and k
         gap_length = j - k;
 
+        //compute on fly
+        //temp_gap_score = get_score(gapMatrix[(i - 1) * max_length + gap_length], effective_length, num_rec, gap_length);
+        temp_gap_score = get_score(gapMatrix, len_seq, effective_length, num_rec, gap_length, max_length, i - 1, is_precomputed);
         if (k == 0) {
           temp_max_scores[j] = alignments[k] +
-                               gapMatrix[(i - 1) * len_seq + gap_length] +
+                               temp_gap_score +
                                score_matrix[i * num_alignments + j];
           temp_gap_lengths[j] = gap_length;
-        } else {
-          if (temp_max_scores[j] <
-              alignments[k] + gapMatrix[(i - 1) * len_seq + gap_length] +
-                  score_matrix[i * num_alignments + j]) {
-            temp_max_scores[j] = alignments[k] +
-                                 gapMatrix[(i - 1) * len_seq + gap_length] +
-                                 score_matrix[i * num_alignments + j];
-            temp_gap_lengths[j] = gap_length;
+        }else{
+          if (temp_max_scores[j] < alignments[k] + temp_gap_score + score_matrix[i * num_alignments + j]) {
+              temp_max_scores[j] = alignments[k] + temp_gap_score + score_matrix[i * num_alignments + j];
+              temp_gap_lengths[j] = gap_length;
           }
         }
       }
@@ -152,7 +239,8 @@ void fill_traceback_matrix(float *score_matrix, int num_alignments, float *gapMa
 
   traceback(num_rec, len_seq, gapMatrix, score_matrix, 
             num_alignments, alignments, gap_alignments,
-            rec_scores, con_scores, con_lengths);
+            rec_scores, con_scores, con_lengths, max_length, 
+            effective_length, is_precomputed);
 
   PyMem_Free(alignments);
   PyMem_Free(gap_alignments);
@@ -248,9 +336,10 @@ static PyObject *py_calculate(PyObject *self, PyObject *args,
   const char *seq;
   static char *kwlist[] = {
       "sequence",   "rec_matrices", "rec_lengths", "con_matrices",
-      "rec_scores", "con_scores",   "con_lengths", NULL};
+      "rec_scores", "con_scores",   "con_lengths", "max_length", NULL};
   Py_ssize_t len_seq;
   Py_ssize_t num_rec;
+  int max_length;
   PyObject *result = Py_None;
   Py_buffer rec_matrices;
   Py_buffer con_matrices;
@@ -266,10 +355,10 @@ static PyObject *py_calculate(PyObject *self, PyObject *args,
   con_scores.obj = NULL;
   con_lengths.obj = NULL;
   if (!PyArg_ParseTupleAndKeywords(
-          args, keywords, "y#O&O&O&O&O&O&", kwlist, &seq, &len_seq,
+          args, keywords, "y#O&O&O&O&O&O&i", kwlist, &seq, &len_seq,
           matrix_converter, &rec_matrices, matrix_converter, &rec_lengths,
           matrix_converter, &con_matrices, matrix_converter, &rec_scores,
-          matrix_converter, &con_scores, matrix_converter, &con_lengths))
+          matrix_converter, &con_scores, matrix_converter, &con_lengths, &max_length))
     return NULL;
 
   // sequence:     DNA sequence used for placement
@@ -289,7 +378,7 @@ static PyObject *py_calculate(PyObject *self, PyObject *args,
   float *rec_scores_ptr = rec_scores.buf;
   int *rec_lengths_ptr = rec_lengths.buf;
   int *con_lengths_ptr = con_lengths.buf;
-
+  bool is_precomputed = true;
   // getting the number of alignments is needed for calculating the size
   // of the array we will use to store the scores for each recognizer alignment
   int forward_offset = get_forward_offset(0, rec_lengths_ptr, num_rec);
@@ -300,6 +389,8 @@ static PyObject *py_calculate(PyObject *self, PyObject *args,
   fill_matrix(seq, len_seq, rec_matrices_ptr, rec_lengths_ptr, num_rec,
               score_matrix, num_alignments);
 
+  if (con_matrices.shape[0] == (num_rec - 1) * 2)
+    is_precomputed = false;
   // traceback function breaks when the number of recognizers is less than
   // two since it opperates on the assumption of having at least one connector
   if (num_rec == 1) {
@@ -310,7 +401,7 @@ static PyObject *py_calculate(PyObject *self, PyObject *args,
   } else {
     fill_traceback_matrix(score_matrix, num_alignments, con_matrices_ptr, rec_lengths_ptr,
               num_rec, len_seq, con_scores_ptr, rec_scores_ptr,
-              con_lengths_ptr);
+              con_lengths_ptr, max_length, is_precomputed);
   }
 
   PyMem_Free(score_matrix);

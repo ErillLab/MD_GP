@@ -38,7 +38,6 @@ class OrganismObject:
         self.recognizers_flat = []
         self.connectors_scores_flat = []
         self.recognizer_lengths = []
-
         # assign organism-specific parameters
 	
         # whether fitness is computed over sequences as sum or average
@@ -75,7 +74,8 @@ class OrganismObject:
         self.mutate_probability_node_mutation = conf[
             "MUTATE_PROBABILITY_NODE_MUTATION"
         ]
-        
+
+        self.is_precomputed = conf["PRECOMPUTE"]
         # min and maximum number of nodes allowed
         self.min_nodes = conf["MIN_NODES"]
         self.max_nodes = conf["MAX_NODES"]
@@ -1078,6 +1078,10 @@ class OrganismObject:
             PlacementObject containing information of optimal placement
         """
         number_PSSM = len(self.recognizers)
+        if number_PSSM < 2:
+            max_seq_length = len(sequence)
+        else:
+            max_seq_length = self.connectors[0].expected_seq_length
 
         # Get an array of lengths of each recognizer in the organism
 
@@ -1086,16 +1090,19 @@ class OrganismObject:
         gaps = np.empty(number_PSSM, dtype = np.dtype('i'))
         gap_scores = np.empty(number_PSSM - 1, dtype = np.dtype('f'))
         PSSM_scores = np.empty(number_PSSM + 1, dtype = np.dtype('f'))
-        _multiplacement.calculate(bytes(sequence, "ASCII"), self.recognizers_flat, self.recognizer_lengths, self.connectors_scores_flat, PSSM_scores, gap_scores, gaps)
+        _multiplacement.calculate(bytes(sequence, "ASCII"), self.recognizers_flat, self.recognizer_lengths, self.connectors_scores_flat, PSSM_scores, gap_scores, gaps, max_seq_length)
         # parse data from the _calculatePlacement module and put it
         # into a PlacementObject to be returned
         placement = PlacementObject(self._id, sequence)
         placement.set_energy(float(PSSM_scores[-1]))
         placement.set_recognizer_scores([float(score) for score in PSSM_scores[:-1]])
         placement.set_connectors_scores([float(score) for score in gap_scores])
-
         current_position = gaps[0]
 
+        """
+        for i in range(len(self.connectors)):
+            print(self.connectors[i].get_score(gaps[i], len(sequence), self.recognizer_lengths))
+        """
         for i in range(number_PSSM):
 
             stop = current_position + self.recognizer_lengths[i]
@@ -1106,7 +1113,7 @@ class OrganismObject:
                 stop = current_position + gaps[i + 1]
                 placement.append_connector_position([int(current_position), int(stop)])
                 current_position += gaps[i + 1]
-        
+        #placement.print_placement(stdout=True)
         return placement
 
     def flatten(self):
@@ -1138,9 +1145,17 @@ class OrganismObject:
         self.recognizers_flat = np.array(flat_recognizers, dtype = np.dtype('f')) 
         self.recognizer_lengths = np.array(recognizer_lengths, dtype = np.dtype('i'))
 
-        for connector in self.connectors:
-            for i in range(connector.expected_seq_length):
-                flat_connector_scores.append(connector.get_score(i, connector.expected_seq_length, self.recognizer_lengths))
-        
-        # organism holds a numpy array of the flattened lists
-        self.connectors_scores_flat = np.array(flat_connector_scores, dtype = np.dtype('f'))
+        if self.is_precomputed == True:
+            for connector in self.connectors:
+                for i in range(connector.expected_seq_length):
+                    flat_connector_scores.append(connector.get_numerator(i, connector.expected_seq_length, self.recognizer_lengths))
+            # organism holds a numpy array of the flattened lists
+            self.connectors_scores_flat = np.array(flat_connector_scores, dtype = np.dtype('f'))
+
+        else:
+            con_mu_sigma = []
+            for connector in self.connectors:
+                con_mu_sigma.append(connector._mu)
+                con_mu_sigma.append(connector._sigma)
+
+            self.connectors_scores_flat = np.array(con_mu_sigma, dtype=np.dtype('f'))
