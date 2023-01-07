@@ -1,8 +1,6 @@
 #include "_multiplacement.h"
 
-void traceback(int num_rec, int len_seq, float* con_matrices, float* rec_score_matrix, 
-               int num_alignments, float* rec_alignments, int* con_alignments,
-               float* rec_scores, float* con_scores, int* con_lengths, int max_seq_len, int effective_len, bool is_precomputed){
+void traceback(int num_rec, int len_seq, float* con_matrices, float* rec_score_matrix, int num_alignments, float* rec_alignments, int* con_alignments, float* rec_scores, float* con_scores, int* con_lengths, int max_seq_len, int effective_len, bool is_precomputed){
   // finding gap lengths to ref orma alignments
   // starting from the index of the greatest score in alignments
   // trace back of gap alignments is conducted by subtracting the value
@@ -39,9 +37,7 @@ void traceback(int num_rec, int len_seq, float* con_matrices, float* rec_score_m
 
 }
 
-void fill_traceback_matrix(float *score_matrix, int num_alignments, float *gapMatrix,
-                           int *cols, int num_rec, int len_seq, float *con_scores, float *rec_scores, 
-                           int *con_lengths, int max_length, bool is_precomputed) {
+void fill_traceback_matrix(float *score_matrix, int num_alignments, float *gapMatrix, int *cols, int num_rec, int len_seq, float *con_scores, float *rec_scores, int *con_lengths, int max_length, bool is_precomputed) {
   int gap_length = 0;
   int effective_length = len_seq;
   int sum_of_lengths = 0;
@@ -54,10 +50,10 @@ void fill_traceback_matrix(float *score_matrix, int num_alignments, float *gapMa
   //  number of total alignments by number of pssms
   //  first index in each column holds current max score for that index
   //  all other indices hold gap lengths that got that alignment
-  float *alignments = PyMem_Calloc(num_alignments, sizeof(*score_matrix));
-  int *gap_alignments = PyMem_Calloc(num_alignments * (num_rec - 1), sizeof(*con_lengths));
-  float *temp_max_scores = PyMem_Calloc(num_alignments, sizeof(*score_matrix));
-  int *temp_gap_lengths = PyMem_Calloc(num_alignments, sizeof(*con_lengths));
+  float *alignments = calloc(num_alignments, sizeof(*score_matrix));
+  int *gap_alignments = calloc(num_alignments * (num_rec - 1), sizeof(*con_lengths));
+  float *temp_max_scores = calloc(num_alignments, sizeof(*score_matrix));
+  int *temp_gap_lengths = calloc(num_alignments, sizeof(*con_lengths));
   float temp_gap_score = 0.0;
 
   // start with first row as our current max
@@ -89,9 +85,7 @@ void fill_traceback_matrix(float *score_matrix, int num_alignments, float *gapMa
         //temp_gap_score = get_score(gapMatrix[(i - 1) * max_length + gap_length], effective_length, num_rec, gap_length);
         temp_gap_score = get_score(gapMatrix, len_seq, effective_length, num_rec, gap_length, max_length, i - 1, is_precomputed);
         if (k == 0) {
-          temp_max_scores[j] = alignments[k] +
-                               temp_gap_score +
-                               score_matrix[i * num_alignments + j];
+          temp_max_scores[j] = alignments[k] + temp_gap_score + score_matrix[i * num_alignments + j];
           temp_gap_lengths[j] = gap_length;
         }else{
           if (temp_max_scores[j] < alignments[k] + temp_gap_score + score_matrix[i * num_alignments + j]) {
@@ -111,21 +105,16 @@ void fill_traceback_matrix(float *score_matrix, int num_alignments, float *gapMa
       temp_gap_lengths[l] = 0;
     }
   }
-  PyMem_Free(temp_max_scores);
-  PyMem_Free(temp_gap_lengths);
+  free(temp_max_scores);
+  free(temp_gap_lengths);
 
-  traceback(num_rec, len_seq, gapMatrix, score_matrix, 
-            num_alignments, alignments, gap_alignments,
-            rec_scores, con_scores, con_lengths, max_length, 
-            effective_length, is_precomputed);
-
-  PyMem_Free(alignments);
-  PyMem_Free(gap_alignments);
+  traceback(num_rec, len_seq, gapMatrix, score_matrix, num_alignments, alignments, gap_alignments, rec_scores, con_scores, con_lengths, max_length, effective_length, is_precomputed);
+  free(alignments);
+  free(gap_alignments);
   
 }
 
-void fill_matrix(const char seq[], int len_seq, float pssm[], int cols[],
-                 int num_rec, float score_matrix[], int num_alignments) {
+void fill_matrix(const char seq[], int len_seq, float pssm[], int cols[], int num_rec, float score_matrix[], int num_alignments) {
   // length of the seq by number of pssms
 
   // printf("last in fill_matrix\n");

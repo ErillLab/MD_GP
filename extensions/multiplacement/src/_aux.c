@@ -7,7 +7,8 @@ int min(int n, int k){
 }
 
 unsigned long long bin(unsigned long long n, unsigned long long k){
-
+  if (n == k)
+    return 1;
   unsigned long long c = 1;
   for (unsigned long long i = 1; i <= k; i++, n--) {
 
