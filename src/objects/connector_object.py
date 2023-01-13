@@ -226,10 +226,10 @@ class ConnectorObject():
         
         # avoid log(0) error when computing e_connector
         if numerator < 1e-100:
-            numerator = 1e-100        
+            numerator = 1e-100
 
         # Apply normalization
-        return numerator / auc
+        return np.log2(numerator / auc)
         
     def get_score(self, d, s_dna_len, recog_sizes) -> float:
         """ Returns the score of the connector, given the observed distance

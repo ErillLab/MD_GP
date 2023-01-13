@@ -72,7 +72,7 @@ float get_score(float *arr, int dna_length, int effective_length, int num_rec,
                  get_denominator(gap_size + 1, num_rec, effective_length));
   }
   
-  return log2(arr[curr_conn * max_length + gap_size]) - 
+  return arr[curr_conn * max_length + gap_size] - 
           (
             (
               NUMERATORS[(effective_length - (gap_size + 1)) - 1] - 
